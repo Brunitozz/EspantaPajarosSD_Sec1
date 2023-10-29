@@ -1,72 +1,109 @@
-//cable usb a microusb
-#include<WiFi.h>
-#include<ThingSpeak.h>
-#include "DNT.h"
-//definimos el pin de datos del sensor que estará conectado al pin 23 del ESPDevKit
-#define DHIPIN 23
-//definimos el tipo de sensor que estamos utilizando en un DNT11
-#define DHITYPE DHT11//DHT 11
-//se actualizan algunos parametros del DHT11 con los puntos definidos anteriormente
-DHT dht(DHIPIN,DHITYPE);
-//definimos como constantes Char las credenciales de acceso a la red WIFI
-const char* ssid = "wifi prrona";
-const char* password = "gfdc1986";
-//definimos las crdenciales para la conexión a la plataforma
-unsigned long channelID = 1624539;
-const char* WriteAPIKEY = "905XV3V6VWBQLJW0";
-//definimos el cliente wifi que usaremos
-WiFiClient cliente;
+
+#define BLYNK_TEMPLATE_ID "TMPL2Y-9Ct_n6"
+#define BLYNK_TEMPLATE_NAME "EspantaPajaros"
+#define BLYNK_AUTH_TOKEN "kWGqveh0xkbun8Svo8QyCZEPVplwtbQF"
+
+/* Comment this out to disable prints and save space */
+#define BLYNK_PRINT Serial
 
 
-//iniciamos la funcion setup
-void setup() {
-  // put your setup code here, to run once:
-  Serial.begin(115200);
-  delay(1000);
-  //imprimimos una frase, e iniciamos nuestro sensor DHI
-  Serial.println("Sensores Instalados y Listos");
-  dht.begin();
-  //iniciamos la conexion a la red wifi, y se imprimiran caracteres indicando el tiempo que tarde la conexion
-  WiFi.begin(ssid.password);
-  while(WiFi.status() != WL_CONECTED){
-    delay(500);
-    Serial.print(".");
+#include <WiFi.h>
+#include <WiFiClient.h>
+#include <BlynkSimpleEsp32.h>
+
+// Your WiFi credentials.
+// Set password to "" for open networks.
+char ssid[] = "NOMBRE";
+char pass[] = "CONTRASEÑA";
+
+
+//Pines
+int const TriggerPin = 32;
+int const EchoPin = 33;
+int const PirPin = 13;
+//int const bocina=2;
+//Pir
+int val=LOW;// LOW=0 y HIGH=1
+int estadoPir=LOW;
+int encender; //para blynk
+
+//BLYNK
+//Pin Virtual V0--> APAGAR/ENCENDER
+BLYNK_WRITE(V0){
+  encender = param.asInt();
+  if(encender==1){
+    Blynk.virtualWrite(V2,"ENCENDIDO");
   }
-  //una vez conectado, se imprimirá una frase y se iniciará la conexion a la plataforma usando el cliente definido anteriormente
-  Serial.println("Conectado al WiFi");
-  ThingSpeak.begin(cliente);
-  delay(5000);
+  if(encender==0){
+    Blynk.virtualWrite(V2,"APAGADO");
+  }
+}
+//EVENTOS
+//Timer
+BlynkTimer timer;
+//Mostrar Deteccion Distancia Ultrasonido
+void myTimerEvent(){
+  Blynk.virtualWrite(V1,calcularDistanciaCm(TriggerPin,EchoPin));
+}
+//Mostrar Deteccion con PIR
+void myTimerEvent1(){
+  Blynk.virtualWrite(V3,digitalRead(PirPin));
 }
 
-
-//iniciamos la funcion loop
-void loop() {
-  // put your main code here, to run repeatedly:
-  //usamos un retardo de 5 segundos, y utilizamos la funcion medicion
-  delay(5000);
-  medicion();
-  //hacemos la conexion y envio de datos a la plataforma, utilizando las credenciales definidas anteriormente
-  ThingSpeak.writeFields(channelID,WriteAPIKEY);
-  //imprimimos una frase indicando el envio, y agregamos un retardo de 10 segundos
-  Serial.println("Datos enviados a ThingSpeak");
-  delay(10000);
+void setup(){
+  //Sensor Ultrasonido
+  pinMode(TriggerPin, OUTPUT);
+  pinMode(EchoPin, INPUT);
+  //Sensor PIR
+  pinMode(PirPin, INPUT);
+  //Bocina
+  //pinMode(bocina, OUTPUT);
+  Serial.begin(9600);
+  Blynk.begin(BLYNK_AUTH_TOKEN, ssid, pass);
 }
 
+void loop(){
+  Blynk.run();  
+  timer.run();
+  if (encender == 1) {
+    myTimerEvent();
+    //Pir
+    val = digitalRead(PirPin);
+    if(val==HIGH){
+      //Accion
+      Blynk.virtualWrite(V3,1);
+      //Ultrasonido
+      if(estadoPir==LOW){
+        Blynk.virtualWrite(V2,"Se detectó movimiento");
+        estadoPir=HIGH;
+      }
+    }
+    else{
+      //Accion
+      Blynk.virtualWrite(V3,0);
+      //Ultrasonido
+      if(estadoPir==HIGH){
+          Blynk.virtualWrite(V2,"No hay movimiento");
+          estadoPir=LOW;
+      }
+    }
+  }
+  else{
 
-//definimos la funcion medicion
-void medicion(){
-  //realizamos la lectura de la temperatura y humedad del sensor
-  float temperatura = dht.readTemperature();
-  float humedad = dht.readHumidity();
-  //imprimimos los valores obtenidos en el terminal Serial
-  Serial.print("Temperatura registrada: ");
-  Serial.print(temperatura);
-  Serial.print("°C");
-  Serial.print("Humedad registrada: ");
-  Serial.print(humedad);
-  Serial.print("%");
-  Serial.print("===============================================================");
-  //indicamos el orden de envio por campos o Field, en el orden definido de la plataforma, junto a los valores del envio
-  ThingSpeak.setField(1,temperatura);
-  ThingSpeak.setField(2,humedad);
+  }
+}
+
+//Cálculos para la distancia
+int calcularDistanciaCm(int TriggerPin, int EchoPin) {
+   long tiempo;
+   int distanciaCm;
+
+  digitalWrite(TriggerPin, LOW);  //para generar un pulso limpio ponemos a LOW 4us
+  delayMicroseconds(4);
+  digitalWrite(TriggerPin, HIGH);  //generamos Trigger (disparo) de 10us
+  delayMicroseconds(10);
+  digitalWrite(TriggerPin, LOW);
+  tiempo = pulseIn(EchoPin, HIGH);  //medimos el tiempo entre pulsos, en microsegundos
+  distanciaCm = tiempo * 10 / 292/ 2;   //convertimos a distancia, en cm
+  return distanciaCm;
 }
